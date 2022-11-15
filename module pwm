@@ -1,0 +1,157 @@
+#pragma config FOSC = INTOSCIO //Selecciona oscilador interno
+#pragma config WDTEN = OFF //Se deshabilita el perro guardian
+#pragma config MCLRE = ON //Se habilita el pin 1 como reset externo
+#pragma config LVP = OFF //Se deshabilita la programaci�n por bajo voltaje
+#pragma config ICPRT = OFF //Se deshabilita el pin para programaci�n y depuraci�n
+
+#include <xc.h>
+#include <stdio.h>
+#define _XTAL_FREQ 1000000
+
+
+void Configuracion(void)
+{
+    OSCCON = 0x23; //0010 0011  >  0011 0010 Freq 1MHz
+    
+    TRISA=0;	//Salidas digitales
+    TRISD=0;	//Salidas digitales
+    TRISC=0; 
+    ANSELD=0;  //entrada digital 
+    ANSELA=0;  //entrada digital 
+    ANSELC=0;
+    LATA = 0;
+    LATC = 0;
+    LATD = 0;
+    
+    ADCON0=0x01; //00000101  //AN1
+    ADCON1=0x08; //00001000  // FVR BUF2
+    ADCON2=0x90; //10010000
+    VREFCON0=0x90;     //10010000 Activar modulo
+    
+    PR2 = 249;
+    CCP1CON=0x0C; // Selecciona modo PWM 
+    T2CON=0x1D; //Postscaler 1:4, prescaler 1:4  0001 1101
+    
+   
+    CCPR1L=250; //0xob Carga CCPR1L con un valor arbitrario 
+    
+    
+}
+
+void putch(char data) {
+    char Activa;
+    Activa = data & 0xF0; //1 1 1 1   0 0 0 0
+    LATD = Activa | 0x05; //0bxxxx0101 (or)
+    __delay_us(10);
+    LATD = Activa | 0x01; //0bxxxx0001
+    __delay_ms(1);
+    Activa = data << 4;
+    LATD = Activa | 0x05;
+    __delay_us(10);
+    LATD = Activa | 0x01;    
+}
+
+void putcm(char data) { // Con esta instrucci�n podremos enviar un car�cter o cadenas de caracteres al LCD.
+    char Activa;
+    Activa = data & 0xF0; //0bxxxx0100
+    LATD = Activa | 0x04;
+    __delay_us(10);
+    LATD = Activa;
+    __delay_ms(1);
+    Activa = data << 4;
+    LATD = Activa | 0x04;
+    __delay_us(10);
+    LATD = Activa;
+}
+
+void InicializaLCD(void)
+{
+    __delay_ms(30);
+    putcm(0x02);    // Inicializa en modo 4 bits 1 0
+    __delay_ms(1);
+
+    putcm(0x28);    // Inicializa en 2 l�neas 5x7 11000
+    __delay_ms(1);
+
+    putcm(0x2C);    //0 0 1 0   1 1 0 0
+    __delay_ms(1);
+
+    putcm(0x0C);//0 0 0 0   1 1 0 0
+    __delay_ms(1);
+
+    putcm(0x06);//0 0 0 0   0 1 1 0
+    __delay_ms(1);
+
+    putcm(0x80); //Posiciona el curson en 1,1  (1 0 0 0   0 0 0 0)
+    __delay_ms(1);
+}
+
+int Conversion(void) 
+{ 
+    ADCON0bits.GO = 1; 
+    while (ADCON0bits.GO); 
+    return ADRESL + ADRESH*256; // Retorna los 10 bits como int 
+} 
+
+
+
+char datos = 0;
+
+void pwm (int tempRef){ 
+    CCPR1L = tempRef/4;
+    datos = tempRef << 4;
+    datos = datos & 0x30; //Enmascara todos los bits menos 5:4 
+    CCP1CON = CCP1CON | datos;
+}
+
+int conta (int tempRef){
+    int conta = 0;
+    if(tempRef < 500){
+        while(tempRef < 501){
+            conta += 1;
+            tempRef = tempRef + 1;
+        }
+    }else if(tempRef > 500){
+        while(tempRef > 501){
+            conta -= 1;
+            tempRef = tempRef - 1;   
+        }
+    }else{}
+    return conta;
+}
+
+void main(void)
+{
+    Configuracion();
+    InicializaLCD(); 
+    int temp = 0;
+    int fijador = 0;
+    
+    while(1){
+        temp = Conversion();    
+        printf("Temp: %d", temp/10);
+        putcm(0x80);//1 0 0 0   0 0 0 0
+        
+        if(PORTAbits.RA6 == 1){
+            fijador = conta(temp);
+            
+            do{
+                temp = fijador + Conversion();
+                pwm(temp);
+                
+                
+                putcm(0xC0);//1 1 0 0   0 0 0 0
+                printf("PWM: %d%c       ", temp/10, '%');
+                
+                __delay_ms(100);
+            }while(PORTAbits.RA7 == 0);
+            putcm(0xC0);//1 1 0 0   0 0 0 0
+            printf("                ");
+        }
+        __delay_ms(100); 
+    }
+    
+    //__delay_ms(100);
+ 
+return;
+}
